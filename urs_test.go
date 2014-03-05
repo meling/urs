@@ -3,6 +3,7 @@ package urs
 import (
 	"fmt"
 	"testing"
+	"runtime"
 	"math/rand"
 	crand "crypto/rand"
 	"crypto/elliptic"
@@ -19,6 +20,7 @@ var (
 )
 
 func TestGenerateKey(t *testing.T) {
+	runtime.GOMAXPROCS(4)
 	var err error
 	testkey, err = GenerateKey(DefaultCurve, crand.Reader)
 	if err != nil {

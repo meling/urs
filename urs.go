@@ -124,7 +124,7 @@ func hashToInt(hash []byte, c elliptic.Curve) *big.Int {
 }
 
 type RingSign struct {
-	Hsx, Hsy *big.Int
+	X, Y *big.Int
 	C, T []*big.Int
 }
 
@@ -139,18 +139,19 @@ func (k *RingSign) String() string {
 		buf.WriteString(k.T[i].String())
 		buf.WriteString("\n")
 	}
-	return fmt.Sprintf("URS:\nHx=%s\nHy=%s\n%s", k.Hsx, k.Hsy, buf.String())
+	return fmt.Sprintf("URS:\nX=%s\nY=%s\n%s", k.X, k.Y, buf.String())
 }
 
-func hashG(curve elliptic.Curve, m []byte) (hx, hy *big.Int) {
+func hashG(c elliptic.Curve, m []byte) (hx, hy *big.Int) {
 	h := sha256.New()
 	h.Write(m)
 	d := h.Sum(nil)
-	hx, hy = curve.ScalarBaseMult(d) // g^H'()
+	hx, hy = c.ScalarBaseMult(d) // g^H'()
 	return
 }
 
-// hashAllq hashes mRab using sha256 (corresponds to hashq() or H'() over Zq)
+// hashAllq hashes all the provided inputs using sha256.
+// This corresponds to hashq() or H'() over Zq
 func hashAllq(mR []byte, ax, ay, bx, by []*big.Int) (hash *big.Int) {
 	h := sha256.New()
 	h.Write(mR)
@@ -161,6 +162,21 @@ func hashAllq(mR []byte, ax, ay, bx, by []*big.Int) (hash *big.Int) {
 		h.Write(by[i].Bytes())
 	}
 	hash = new(big.Int).SetBytes(h.Sum(nil))
+	return
+}
+
+// hashAllq hashes all the provided inputs using sha256.
+// This corresponds to hashq() or H'() over Zq
+func hashAllqc(c elliptic.Curve, mR []byte, ax, ay, bx, by []*big.Int) (hash *big.Int) {
+	h := sha256.New()
+	h.Write(mR)
+	for i := 0; i < len(ax); i++ {
+		h.Write(ax[i].Bytes())
+		h.Write(ay[i].Bytes())
+		h.Write(bx[i].Bytes())
+		h.Write(by[i].Bytes())
+	}
+	hash = hashToInt(h.Sum(nil), c)
 	return
 }
 
@@ -187,17 +203,17 @@ func Sign(rand io.Reader, priv *PrivateKey, R *PublicKeyRing, m []byte) (rs *Rin
 	var id int
 	sum := new(big.Int).SetInt64(0)
 	for j := 0; j < s; j++ {
+		c[j], err = randFieldElement(curve, rand)
+		if err != nil { return }
+		t[j], err = randFieldElement(curve, rand)
+		if err != nil { return }
+
 		if R.Ring[j] == pub {
 			id = j
+			rb := t[j].Bytes()
+			ax[id], ay[id] = curve.ScalarBaseMult(rb) // g^r
+			bx[id], by[id] = curve.ScalarMult(hx, hy, rb) // H(mR)^r
 		} else {
-			c[j], err = randFieldElement(curve, rand)
-			if err != nil {
-				return
-			}
-			t[j], err = randFieldElement(curve, rand)
-			if err != nil {
-				return
-			}
 			ax1, ay1 := curve.ScalarBaseMult(t[j].Bytes()) // g^tj
 			ax2, ay2 := curve.ScalarMult(R.Ring[j].X, R.Ring[j].Y, c[j].Bytes()) // yj^cj
 			ax[j], ay[j] = curve.Add(ax1, ay1, ax2, ay2)
@@ -211,27 +227,16 @@ func Sign(rand io.Reader, priv *PrivateKey, R *PublicKeyRing, m []byte) (rs *Rin
 			sum.Add(sum, c[j]) // Sum needed in Step 3 of the algorithm
 		}
 	}
-	// Compute stuff for my public key at index id
-	var r *big.Int
-	r, err = randFieldElement(curve, rand)
-	if err != nil {
-		return
-	}
-	rb := r.Bytes()
-	ax[id], ay[id] = curve.ScalarBaseMult(rb) // g^r
-	bx[id], by[id] = curve.ScalarMult(hx, hy, rb) // H(mR)^r
-
 	// Step 3, part 1: cid = H(m,R,{a,b}) - sum(cj) mod N
 	hashmRab := hashAllq(mR, ax, ay, bx, by)
-	c[id] = new(big.Int).SetInt64(0)
+	// hashmRab := hashAllqc(curve, mR, ax, ay, bx, by)
 	c[id].Sub(hashmRab, sum)
 	c[id].Mod(c[id], N)
 
 	// Step 3, part 2: tid = ri - cid * xi mod N
 	cx := new(big.Int)
 	cx.Mul(priv.D, c[id])
-	t[id] = new(big.Int).SetInt64(0)
-	t[id].Sub(r, cx)
+	t[id].Sub(t[id], cx) // here t[id] = ri (initialized inside the for-loop above)
 	t[id].Mod(t[id], N)
 
 	hsx, hsy := curve.ScalarMult(hx, hy, priv.D.Bytes()) // Step 4: H(mR)^xi
@@ -247,7 +252,7 @@ func Verify(R *PublicKeyRing, m []byte, rs *RingSign) bool {
 	}
 	c := R.Ring[0].Curve
 	N := c.Params().N
-	x, y := rs.Hsx, rs.Hsy
+	x, y := rs.X, rs.Y
 
 	if x.Sign() == 0 || y.Sign() == 0 {
 		return false
@@ -283,6 +288,7 @@ func Verify(R *PublicKeyRing, m []byte, rs *RingSign) bool {
 		sum.Add(sum, rs.C[j])
 	}
 	hashmRab := hashAllq(mR, ax, ay, bx, by)
+	// hashmRab := hashAllqc(c, mR, ax, ay, bx, by)
 	hashmRab.Mod(hashmRab, N)
 	sum.Mod(sum, N)
 	return sum.Cmp(hashmRab) == 0
