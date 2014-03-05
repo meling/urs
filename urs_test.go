@@ -76,14 +76,20 @@ func TestVerify(t *testing.T) {
 	}
 }
 
-func BenchmarkSignature(b *testing.B) {
+func BenchmarkSign(b *testing.B) {
+	var err error
 	for i := 0; i < b.N; i++ {
-		sig, err := Sign(crand.Reader, testkey, keyring, testmsg)
+		testsig, err = Sign(crand.Reader, testkey, keyring, testmsg)
 		if err != nil {
 			fmt.Println(err.Error())
 			b.FailNow()
 		}
-		if !Verify(keyring, testmsg, sig) {
+	}
+}
+
+func BenchmarkVerify(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		if !Verify(keyring, testmsg, testsig) {
 			fmt.Println("urs: signature verification failed")
 			b.FailNow()
 		}

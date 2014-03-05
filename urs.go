@@ -73,10 +73,10 @@ var one = new(big.Int).SetInt64(1)
 
 // randFieldElement returns a random element of the field underlying the given
 // curve using the procedure given in [NSA] A.2.1.
-func randFieldElement(c elliptic.Curve, crand io.Reader) (k *big.Int, err error) {
+func randFieldElement(c elliptic.Curve, rand io.Reader) (k *big.Int, err error) {
 	params := c.Params()
 	b := make([]byte, params.BitSize/8+8)
-	_, err = io.ReadFull(crand, b)
+	_, err = io.ReadFull(rand, b)
 	if err != nil {
 		return
 	}
@@ -146,14 +146,21 @@ func hashG(curve elliptic.Curve, m []byte) (hx, hy *big.Int) {
 	h := sha256.New()
 	h.Write(m)
 	d := h.Sum(nil)
-	hx, hy = curve.ScalarBaseMult(d)
+	hx, hy = curve.ScalarBaseMult(d) // g^H'()
 	return
 }
 
-func hashq(m []byte) (d []byte) {
+// hashAllq hashes mRab using sha256 (corresponds to hashq() or H'() over Zq)
+func hashAllq(mR []byte, ax, ay, bx, by []*big.Int) (hash *big.Int) {
 	h := sha256.New()
-	h.Write(m)
-	d = h.Sum(nil)
+	h.Write(mR)
+	for i := 0; i < len(ax); i++ {
+		h.Write(ax[i].Bytes())
+		h.Write(ay[i].Bytes())
+		h.Write(bx[i].Bytes())
+		h.Write(by[i].Bytes())
+	}
+	hash = new(big.Int).SetBytes(h.Sum(nil))
 	return
 }
 
@@ -176,7 +183,6 @@ func Sign(rand io.Reader, priv *PrivateKey, R *PublicKeyRing, m []byte) (rs *Rin
 
 	mR := append(m, R.Bytes()...)
 	hx, hy := hashG(curve, mR) // H(mR)
-	hsx, hsy := curve.ScalarMult(hx, hy, priv.D.Bytes()) // Step 4: H(mR)^xi
 
 	var id int
 	sum := new(big.Int).SetInt64(0)
@@ -186,11 +192,11 @@ func Sign(rand io.Reader, priv *PrivateKey, R *PublicKeyRing, m []byte) (rs *Rin
 		} else {
 			c[j], err = randFieldElement(curve, rand)
 			if err != nil {
-				return nil, err
+				return
 			}
 			t[j], err = randFieldElement(curve, rand)
 			if err != nil {
-				return nil, err
+				return
 			}
 			ax1, ay1 := curve.ScalarBaseMult(t[j].Bytes()) // g^tj
 			ax2, ay2 := curve.ScalarMult(R.Ring[j].X, R.Ring[j].Y, c[j].Bytes()) // yj^cj
@@ -200,7 +206,7 @@ func Sign(rand io.Reader, priv *PrivateKey, R *PublicKeyRing, m []byte) (rs *Rin
 			w.Mul(priv.D, c[j])
 			w.Add(w, t[j])
 			w.Mod(w, N)
-			bx[j], by[j] = curve.ScalarMult(hx, hy, w.Bytes())
+			bx[j], by[j] = curve.ScalarMult(hx, hy, w.Bytes()) // H(mR)^(xi*cj+tj)
 
 			sum.Add(sum, c[j]) // Sum needed in Step 3 of the algorithm
 		}
@@ -209,38 +215,30 @@ func Sign(rand io.Reader, priv *PrivateKey, R *PublicKeyRing, m []byte) (rs *Rin
 	var r *big.Int
 	r, err = randFieldElement(curve, rand)
 	if err != nil {
-		return nil, err
+		return
 	}
 	rb := r.Bytes()
 	ax[id], ay[id] = curve.ScalarBaseMult(rb) // g^r
 	bx[id], by[id] = curve.ScalarMult(hx, hy, rb) // H(mR)^r
 
-	mRab := make([]byte, 0)
-	mRab = append(mRab, mR...)
-	for i := 0; i < s; i++ {
-		mRab = append(mRab, ax[i].Bytes()...)
-		mRab = append(mRab, ay[i].Bytes()...)
-		mRab = append(mRab, bx[i].Bytes()...)
-		mRab = append(mRab, by[i].Bytes()...)
-	}
-	// hashmRab := hashToInt(hashq(mRab), curve)
-	// Step 3, part 1: c_i = H(m,R,{a,b}) - sum(c_j) mod N
-	hashmRab := new(big.Int).SetBytes(hashq(mRab))
+	// Step 3, part 1: cid = H(m,R,{a,b}) - sum(cj) mod N
+	hashmRab := hashAllq(mR, ax, ay, bx, by)
 	c[id] = new(big.Int).SetInt64(0)
 	c[id].Sub(hashmRab, sum)
 	c[id].Mod(c[id], N)
 
-	// Step 3, part 2: t_i = r_i - c_i x x_i mod N
+	// Step 3, part 2: tid = ri - cid * xi mod N
 	cx := new(big.Int)
 	cx.Mul(priv.D, c[id])
 	t[id] = new(big.Int).SetInt64(0)
 	t[id].Sub(r, cx)
 	t[id].Mod(t[id], N)
 
+	hsx, hsy := curve.ScalarMult(hx, hy, priv.D.Bytes()) // Step 4: H(mR)^xi
 	return &RingSign{hsx, hsy, c, t}, nil
 }
 
-// Verify verifies the signature in r, s of hash using the public key, pub. Its
+// Verify verifies the signature in rs of m using the public key ring, R. Its
 // return value records whether the signature is valid.
 func Verify(R *PublicKeyRing, m []byte, rs *RingSign) bool {
 	s := R.Len()
@@ -249,8 +247,7 @@ func Verify(R *PublicKeyRing, m []byte, rs *RingSign) bool {
 	}
 	c := R.Ring[0].Curve
 	N := c.Params().N
-	x := rs.Hsx
-	y := rs.Hsy
+	x, y := rs.Hsx, rs.Hsy
 
 	if x.Sign() == 0 || y.Sign() == 0 {
 		return false
@@ -285,16 +282,7 @@ func Verify(R *PublicKeyRing, m []byte, rs *RingSign) bool {
 		bx[j], by[j] = c.Add(bx1, by1, bx2, by2)
 		sum.Add(sum, rs.C[j])
 	}
-	// 3. Check signature...
-	mRab := make([]byte, 0)
-	mRab = append(mRab, mR...)
-	for i := 0; i < s; i++ {
-		mRab = append(mRab, ax[i].Bytes()...)
-		mRab = append(mRab, ay[i].Bytes()...)
-		mRab = append(mRab, bx[i].Bytes()...)
-		mRab = append(mRab, by[i].Bytes()...)
-	}
-	hashmRab := new(big.Int).SetBytes(hashq(mRab))
+	hashmRab := hashAllq(mR, ax, ay, bx, by)
 	hashmRab.Mod(hashmRab, N)
 	sum.Mod(sum, N)
 	return sum.Cmp(hashmRab) == 0
