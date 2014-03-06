@@ -19,6 +19,7 @@ import (
 	"bytes"
 	"io"
 	"fmt"
+	"sync"
 	"math/big"
 )
 
@@ -260,8 +261,7 @@ func Verify(R *PublicKeyRing, m []byte, rs *RingSign) bool {
 	if x.Cmp(N) >= 0 || y.Cmp(N) >= 0 {
 		return false
 	}
-	// 1. Tau is on curve
-	if !c.IsOnCurve(x, y) {
+	if !c.IsOnCurve(x, y) { // Is tau (x,y) on the curve
 		return false
 	}
 	mR := append(m, R.Bytes()...)
@@ -272,21 +272,27 @@ func Verify(R *PublicKeyRing, m []byte, rs *RingSign) bool {
 	ay := make([]*big.Int, s, s)
 	bx := make([]*big.Int, s, s)
 	by := make([]*big.Int, s, s)
+	var wg sync.WaitGroup
 	for j := 0; j < s; j++ {
-		// 2. Check that cj,tj is in range [0..N]
+		// Check that cj,tj is in range [0..N]
 		if rs.C[j].Cmp(N) >= 0 || rs.T[j].Cmp(N) >= 0 {
 			return false
 		}
-		tb := rs.T[j].Bytes()
-		cb := rs.C[j].Bytes()
-		ax1, ay1 := c.ScalarBaseMult(tb) // g^tj
-		ax2, ay2 := c.ScalarMult(R.Ring[j].X, R.Ring[j].Y, cb) // yj^cj
-		ax[j], ay[j] = c.Add(ax1, ay1, ax2, ay2)
-		bx1, by1 := c.ScalarMult(hx, hy, tb) // H(mR)^tj
-		bx2, by2 := c.ScalarMult(x, y, cb) // tau^cj
-		bx[j], by[j] = c.Add(bx1, by1, bx2, by2)
+		wg.Add(1)
+		go func(j int) {
+			defer wg.Done()
+			cb := rs.C[j].Bytes()
+			tb := rs.T[j].Bytes()
+			ax1, ay1 := c.ScalarBaseMult(tb) // g^tj
+			ax2, ay2 := c.ScalarMult(R.Ring[j].X, R.Ring[j].Y, cb) // yj^cj
+			ax[j], ay[j] = c.Add(ax1, ay1, ax2, ay2)
+			bx1, by1 := c.ScalarMult(hx, hy, tb) // H(mR)^tj
+			bx2, by2 := c.ScalarMult(x, y, cb) // tau^cj
+			bx[j], by[j] = c.Add(bx1, by1, bx2, by2)
+		}(j)
 		sum.Add(sum, rs.C[j])
 	}
+	wg.Wait()
 	hashmRab := hashAllq(mR, ax, ay, bx, by)
 	// hashmRab := hashAllqc(c, mR, ax, ay, bx, by)
 	hashmRab.Mod(hashmRab, N)

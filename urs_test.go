@@ -90,6 +90,7 @@ func BenchmarkSign(b *testing.B) {
 }
 
 func BenchmarkVerify(b *testing.B) {
+	runtime.GOMAXPROCS(8)
 	for i := 0; i < b.N; i++ {
 		if !Verify(keyring, testmsg, testsig) {
 			fmt.Println("urs: signature verification failed")
