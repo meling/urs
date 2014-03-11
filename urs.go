@@ -182,7 +182,7 @@ func hashAllqc(c elliptic.Curve, mR []byte, ax, ay, bx, by []*big.Int) (hash *bi
 }
 
 // Sign signs an arbitrary length message (which should NOT be the hash of a
-// larger message) using the private key, priv and the public key ring, ring. 
+// larger message) using the private key, priv and the public key ring, R. 
 // It returns the signature as a struct of type RingSign.
 // The security of the private key depends on the entropy of rand.
 // The public keys in the ring must all be using the same curve.
@@ -202,32 +202,38 @@ func Sign(rand io.Reader, priv *PrivateKey, R *PublicKeyRing, m []byte) (rs *Rin
 	hx, hy := hashG(curve, mR) // H(mR)
 
 	var id int
+	var wg sync.WaitGroup
 	sum := new(big.Int).SetInt64(0)
 	for j := 0; j < s; j++ {
-		c[j], err = randFieldElement(curve, rand)
-		if err != nil { return }
-		t[j], err = randFieldElement(curve, rand)
-		if err != nil { return }
+		wg.Add(1)
+		go func(j int) {
+			defer wg.Done()
+			c[j], err = randFieldElement(curve, rand)
+			if err != nil { return }
+			t[j], err = randFieldElement(curve, rand)
+			if err != nil { return }
 
-		if R.Ring[j] == pub {
-			id = j
-			rb := t[j].Bytes()
-			ax[id], ay[id] = curve.ScalarBaseMult(rb) // g^r
-			bx[id], by[id] = curve.ScalarMult(hx, hy, rb) // H(mR)^r
-		} else {
-			ax1, ay1 := curve.ScalarBaseMult(t[j].Bytes()) // g^tj
-			ax2, ay2 := curve.ScalarMult(R.Ring[j].X, R.Ring[j].Y, c[j].Bytes()) // yj^cj
-			ax[j], ay[j] = curve.Add(ax1, ay1, ax2, ay2)
+			if R.Ring[j] == pub {
+				id = j
+				rb := t[j].Bytes()
+				ax[id], ay[id] = curve.ScalarBaseMult(rb) // g^r
+				bx[id], by[id] = curve.ScalarMult(hx, hy, rb) // H(mR)^r
+			} else {
+				ax1, ay1 := curve.ScalarBaseMult(t[j].Bytes()) // g^tj
+				ax2, ay2 := curve.ScalarMult(R.Ring[j].X, R.Ring[j].Y, c[j].Bytes()) // yj^cj
+				ax[j], ay[j] = curve.Add(ax1, ay1, ax2, ay2)
 
-			w := new(big.Int)
-			w.Mul(priv.D, c[j])
-			w.Add(w, t[j])
-			w.Mod(w, N)
-			bx[j], by[j] = curve.ScalarMult(hx, hy, w.Bytes()) // H(mR)^(xi*cj+tj)
-
-			sum.Add(sum, c[j]) // Sum needed in Step 3 of the algorithm
-		}
+				w := new(big.Int)
+				w.Mul(priv.D, c[j])
+				w.Add(w, t[j])
+				w.Mod(w, N)
+				bx[j], by[j] = curve.ScalarMult(hx, hy, w.Bytes()) // H(mR)^(xi*cj+tj)
+				// TODO may need to lock on sum object.
+				sum.Add(sum, c[j]) // Sum needed in Step 3 of the algorithm
+			}
+		}(j)
 	}
+	wg.Wait()
 	// Step 3, part 1: cid = H(m,R,{a,b}) - sum(cj) mod N
 	hashmRab := hashAllq(mR, ax, ay, bx, by)
 	// hashmRab := hashAllqc(curve, mR, ax, ay, bx, by)

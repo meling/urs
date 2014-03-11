@@ -9,7 +9,7 @@ import (
 	"crypto/elliptic"
 )
 
-const numOfKeys=100
+const numOfKeys=1000
 
 var (
 	DefaultCurve = elliptic.P256()
@@ -79,6 +79,7 @@ func TestVerify(t *testing.T) {
 }
 
 func BenchmarkSign(b *testing.B) {
+	runtime.GOMAXPROCS(8)
 	var err error
 	for i := 0; i < b.N; i++ {
 		testsig, err = Sign(crand.Reader, testkey, keyring, testmsg)
