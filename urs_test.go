@@ -1,22 +1,22 @@
 package urs
 
 import (
-	"fmt"
-	"testing"
-	"runtime"
-	"math/rand"
-	crand "crypto/rand"
 	"crypto/elliptic"
+	crand "crypto/rand"
+	"fmt"
+	"math/rand"
+	"runtime"
+	"testing"
 )
 
-const numOfKeys=1000
+const numOfKeys = 1000
 
 var (
 	DefaultCurve = elliptic.P256()
-	keyring *PublicKeyRing
-	testkey *PrivateKey
-	testmsg []byte
-	testsig *RingSign
+	keyring      *PublicKeyRing
+	testkey      *PrivateKey
+	testmsg      []byte
+	testsig      *RingSign
 )
 
 func TestGenerateKey(t *testing.T) {

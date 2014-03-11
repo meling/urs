@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-// Package urs implements Unique Ring Signatures, as defined in 
+// Package urs implements Unique Ring Signatures, as defined in
 // short version: http://csiflabs.cs.ucdavis.edu/~hbzhang/romring.pdf
 // full version: http://eprint.iacr.org/2012/577.pdf
 package urs
@@ -14,13 +14,13 @@ package urs
 //     http://www.secg.org/download/aid-780/sec1-v2.pdf
 
 import (
+	"bytes"
 	"crypto/elliptic"
 	"crypto/sha256"
-	"bytes"
-	"io"
 	"fmt"
-	"sync"
+	"io"
 	"math/big"
+	"sync"
 )
 
 // PublicKey corresponds to a ECDSA public key.
@@ -182,7 +182,7 @@ func hashAllqc(c elliptic.Curve, mR []byte, ax, ay, bx, by []*big.Int) (hash *bi
 }
 
 // Sign signs an arbitrary length message (which should NOT be the hash of a
-// larger message) using the private key, priv and the public key ring, R. 
+// larger message) using the private key, priv and the public key ring, R.
 // It returns the signature as a struct of type RingSign.
 // The security of the private key depends on the entropy of rand.
 // The public keys in the ring must all be using the same curve.
@@ -209,17 +209,21 @@ func Sign(rand io.Reader, priv *PrivateKey, R *PublicKeyRing, m []byte) (rs *Rin
 		go func(j int) {
 			defer wg.Done()
 			c[j], err = randFieldElement(curve, rand)
-			if err != nil { return }
+			if err != nil {
+				return
+			}
 			t[j], err = randFieldElement(curve, rand)
-			if err != nil { return }
+			if err != nil {
+				return
+			}
 
 			if R.Ring[j] == pub {
 				id = j
 				rb := t[j].Bytes()
-				ax[id], ay[id] = curve.ScalarBaseMult(rb) // g^r
+				ax[id], ay[id] = curve.ScalarBaseMult(rb)     // g^r
 				bx[id], by[id] = curve.ScalarMult(hx, hy, rb) // H(mR)^r
 			} else {
-				ax1, ay1 := curve.ScalarBaseMult(t[j].Bytes()) // g^tj
+				ax1, ay1 := curve.ScalarBaseMult(t[j].Bytes())                       // g^tj
 				ax2, ay2 := curve.ScalarMult(R.Ring[j].X, R.Ring[j].Y, c[j].Bytes()) // yj^cj
 				ax[j], ay[j] = curve.Add(ax1, ay1, ax2, ay2)
 
@@ -289,11 +293,11 @@ func Verify(R *PublicKeyRing, m []byte, rs *RingSign) bool {
 			defer wg.Done()
 			cb := rs.C[j].Bytes()
 			tb := rs.T[j].Bytes()
-			ax1, ay1 := c.ScalarBaseMult(tb) // g^tj
+			ax1, ay1 := c.ScalarBaseMult(tb)                       // g^tj
 			ax2, ay2 := c.ScalarMult(R.Ring[j].X, R.Ring[j].Y, cb) // yj^cj
 			ax[j], ay[j] = c.Add(ax1, ay1, ax2, ay2)
 			bx1, by1 := c.ScalarMult(hx, hy, tb) // H(mR)^tj
-			bx2, by2 := c.ScalarMult(x, y, cb) // tau^cj
+			bx2, by2 := c.ScalarMult(x, y, cb)   // tau^cj
 			bx[j], by[j] = c.Add(bx1, by1, bx2, by2)
 		}(j)
 		sum.Add(sum, rs.C[j])
