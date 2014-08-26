@@ -1,4 +1,9 @@
-urs
-===
+Unique Ring Signatures (URS)
+============================
 
-Unique Ring Signatures to sign/verify messages anonymously (among a group of known users)
+URS can be used to sign messages anonymously (among a group of known users).
+That is a user can sign a message, hiding among a group of known/registered
+users, that prevents the verifier from revealing the signer's identity other
+than knowing that it is in the set of registered users. The size of the set of
+registered users is flexible, but currently fixed to 1000. Increasing this
+number slows down signing and verifying linearly.

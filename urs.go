@@ -1,5 +1,5 @@
 // Copyright 2014 Hein Meling and Haibin Zhang. All rights reserved.
-// Use of this source code is governed by a BSD-style
+// Use of this source code is governed by the MIT
 // license that can be found in the LICENSE file.
 
 // Package urs implements Unique Ring Signatures, as defined in
